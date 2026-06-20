@@ -34,6 +34,8 @@ const POST_MAX_DELAY_MS = 8000
 /** Hoisted TextDecoder options to avoid per-chunk allocation in readStream. */
 const STREAM_DECODE_OPTS: TextDecodeOptions = { stream: true }
 
+export const MAX_SSE_BUFFER_CHARS = 1024 * 1024
+
 /** Hoisted axios validateStatus callback to avoid per-request closure allocation. */
 function alwaysValidStatus(): boolean {
   return true
@@ -113,6 +115,12 @@ export function parseSSEFrames(buffer: string): {
   }
 
   return { frames, remaining: buffer.slice(pos) }
+}
+
+export function assertSSEBufferWithinLimit(buffer: string): void {
+  if (buffer.length > MAX_SSE_BUFFER_CHARS) {
+    throw new Error('SSE frame buffer exceeded maximum size')
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +355,7 @@ export class SSETransport implements Transport {
         if (done) break
 
         buffer += decoder.decode(value, STREAM_DECODE_OPTS)
+        assertSSEBufferWithinLimit(buffer)
         const { frames, remaining } = parseSSEFrames(buffer)
         buffer = remaining
 

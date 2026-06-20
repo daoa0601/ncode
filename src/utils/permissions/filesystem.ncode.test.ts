@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { getOriginalCwd } from '../../bootstrap/state.js'
-import { getNcodeSkillScope, isNcodeSettingsPath } from './filesystem.js'
+import { getPlanFilePath } from '../plans.js'
+import {
+  getNcodeSkillScope,
+  isNcodeSettingsPath,
+  isSessionPlanFile,
+} from './filesystem.js'
 
 describe('managed config canonical .ncode paths', () => {
   test('treats .ncode settings files as managed settings paths', () => {
@@ -17,5 +22,14 @@ describe('managed config canonical .ncode paths', () => {
       skillName: 'verify',
       pattern: '/.ncode/skills/verify/**',
     })
+  })
+
+  test('matches only exact current-session plan filenames', () => {
+    const planPath = getPlanFilePath()
+
+    expect(isSessionPlanFile(planPath)).toBe(true)
+    expect(isSessionPlanFile(planPath.replace(/\.md$/, '-suffix.md'))).toBe(
+      false,
+    )
   })
 })

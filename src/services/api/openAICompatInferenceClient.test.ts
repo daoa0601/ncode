@@ -908,6 +908,75 @@ describe('mapOpenAIChatCompletionToAnthropicMessage', () => {
   })
 })
 
+describe('mapOpenAIChatCompletionToAnthropicMessage cache-read normalization', () => {
+  // OpenAI-compat providers report prompt-cache hits under different keys.
+  // mapUsage must recover the read count from whichever field is present so
+  // cache-read accounting is not silently zeroed for non-OpenAI-spec servers.
+  // (Cache CREATION is unrecoverable here — servers don't report it — and is
+  // out of scope; it stays 0.)
+  function cacheReadForUsage(usage: Record<string, unknown>): number {
+    const message = mapOpenAIChatCompletionToAnthropicMessage(
+      {
+        id: 'chatcmpl-1',
+        model: 'glm-5.2',
+        choices: [
+          { message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' },
+        ],
+        usage,
+      } as never,
+      new Response('{}'),
+      'fallback-model',
+    )
+    return message.usage?.cache_read_input_tokens ?? -1
+  }
+
+  it('reads cache hits from the OpenAI-spec prompt_tokens_details.cached_tokens', () => {
+    expect(
+      cacheReadForUsage({
+        prompt_tokens: 10,
+        completion_tokens: 1,
+        prompt_tokens_details: { cached_tokens: 7 },
+      }),
+    ).toBe(7)
+  })
+
+  it('recovers cache hits from DeepSeek-style prompt_cache_hit_tokens', () => {
+    expect(
+      cacheReadForUsage({
+        prompt_tokens: 10,
+        completion_tokens: 1,
+        prompt_cache_hit_tokens: 7,
+      }),
+    ).toBe(7)
+  })
+
+  it('recovers cache hits from a top-level cached_tokens field', () => {
+    expect(
+      cacheReadForUsage({ prompt_tokens: 10, completion_tokens: 1, cached_tokens: 5 }),
+    ).toBe(5)
+  })
+
+  it('recovers cache hits from a cache_hit_tokens field', () => {
+    expect(
+      cacheReadForUsage({ prompt_tokens: 10, completion_tokens: 1, cache_hit_tokens: 3 }),
+    ).toBe(3)
+  })
+
+  it('records 0 when the provider explicitly reports zero cache hits', () => {
+    expect(
+      cacheReadForUsage({
+        prompt_tokens: 10,
+        completion_tokens: 1,
+        prompt_tokens_details: { cached_tokens: 0 },
+      }),
+    ).toBe(0)
+  })
+
+  it('records 0 (not NaN) when no recognized cache field is present', () => {
+    expect(cacheReadForUsage({ prompt_tokens: 10, completion_tokens: 1 })).toBe(0)
+  })
+})
+
 describe('OpenAICompatInferenceClient', () => {
   it('streams OpenAI chat chunks as Anthropic-style events with raw headers preserved', async () => {
     const sseData = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`

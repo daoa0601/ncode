@@ -36,6 +36,7 @@ import { getNcodeUserAgent } from '../../utils/userAgent.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import { logEvent } from '../analytics/index.js'
 import { getRetryDelay } from '../api/withRetry.js'
+import { scanForSecrets } from '../teamMemorySync/secretScanner.js'
 import {
   getCurrentSettingsSyncSession,
   hasUsableSettingsSyncSession,
@@ -50,6 +51,10 @@ import {
 const SETTINGS_SYNC_TIMEOUT_MS = 10000 // 10 seconds
 const DEFAULT_MAX_RETRIES = 3
 const MAX_FILE_SIZE_BYTES = 500 * 1024 // 500 KB per file (matches backend limit)
+
+export function containsSettingsSyncSecret(content: string): boolean {
+  return scanForSecrets(content).length > 0
+}
 
 /**
  * Upload local settings to remote (interactive CLI only).
@@ -403,6 +408,11 @@ async function tryReadFileForSync(filePath: string): Promise<string | null> {
     const content = await readFile(filePath, 'utf8')
     // Check for empty/whitespace-only without allocating a trimmed copy
     if (!content || /^\s*$/.test(content)) {
+      return null
+    }
+
+    if (containsSettingsSyncSecret(content)) {
+      logForDiagnosticsNoPII('info', 'settings_sync_file_contains_secret')
       return null
     }
 

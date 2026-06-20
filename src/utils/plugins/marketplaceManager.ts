@@ -64,6 +64,7 @@ import {
 } from './marketplaceHelpers.js'
 import {
   isOfficialMarketplaceGitFallbackEnabled,
+  isOfficialMarketplaceSupported,
   OFFICIAL_MARKETPLACE_NAME,
   OFFICIAL_MARKETPLACE_SOURCE,
 } from './officialMarketplace.js'
@@ -163,21 +164,25 @@ export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
 
   // Only the official marketplace can be implicitly declared — it's the one
   // built-in source we know. Other marketplaces have no default source to inject.
+  // It is also gated to internal builds because the public repo does not host
+  // the marketplace.
   // Explicitly-disabled entries (value: false) don't count.
-  const enabledPlugins = {
-    ...getAddDirEnabledPlugins(),
-    ...(getInitialSettings().enabledPlugins ?? {}),
-  }
-  for (const [pluginId, value] of Object.entries(enabledPlugins)) {
-    if (
-      value &&
-      parsePluginIdentifier(pluginId).marketplace === OFFICIAL_MARKETPLACE_NAME
-    ) {
-      implicit[OFFICIAL_MARKETPLACE_NAME] = {
-        source: OFFICIAL_MARKETPLACE_SOURCE,
-        sourceIsFallback: true,
+  if (isOfficialMarketplaceSupported()) {
+    const enabledPlugins = {
+      ...getAddDirEnabledPlugins(),
+      ...(getInitialSettings().enabledPlugins ?? {}),
+    }
+    for (const [pluginId, value] of Object.entries(enabledPlugins)) {
+      if (
+        value &&
+        parsePluginIdentifier(pluginId).marketplace === OFFICIAL_MARKETPLACE_NAME
+      ) {
+        implicit[OFFICIAL_MARKETPLACE_NAME] = {
+          source: OFFICIAL_MARKETPLACE_SOURCE,
+          sourceIsFallback: true,
+        }
+        break
       }
-      break
     }
   }
 

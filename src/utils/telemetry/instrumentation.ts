@@ -46,6 +46,7 @@ import { getCACertificates } from '../caCerts.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { getHasFormattedOutput, logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
+import { isTelemetryDisabled } from '../privacyLevel.js'
 import { errorMessage } from '../errors.js'
 import { getMTLSConfig } from '../mtls.js'
 import { getProxyUrl, shouldBypassProxy } from '../proxy.js'
@@ -460,13 +461,19 @@ export async function initializeTelemetry() {
   logForDebugging(
     `[3P telemetry] isTelemetryEnabled=${telemetryEnabled} (CLAUDE_CODE_ENABLE_TELEMETRY=${process.env.CLAUDE_CODE_ENABLE_TELEMETRY})`,
   )
-  if (telemetryEnabled) {
-    readers.push(...(await getOtlpReaders()))
-  }
+  // The privacy level is authoritative: under no-telemetry / essential-traffic
+  // we create NO export readers at all, so neither opt-in OTLP nor first-party
+  // BigQuery metrics can phone home — regardless of API-customer status or a
+  // stale metrics-opt-out disk cache.
+  if (!isTelemetryDisabled()) {
+    if (telemetryEnabled) {
+      readers.push(...(await getOtlpReaders()))
+    }
 
-  // Add BigQuery exporter (for API customers, C4E users, and internal users)
-  if (isBigQueryMetricsEnabled()) {
-    readers.push(getBigQueryExportingReader())
+    // Add BigQuery exporter (for API customers, C4E users, and internal users)
+    if (isBigQueryMetricsEnabled()) {
+      readers.push(getBigQueryExportingReader())
+    }
   }
 
   // Create base resource with service attributes

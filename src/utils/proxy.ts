@@ -284,8 +284,13 @@ export function getWebSocketProxyUrl(url: string): string | undefined {
  *   into non-Anthropic-API fetch paths (MCP HTTP/SSE transports, etc.) or those
  *   requests get misrouted to api.anthropic.com. Only the Anthropic SDK client
  *   should pass `true` here.
+ * @param opts.url - Target URL used to honor NO_PROXY when the runtime only
+ *   supports a single fetch proxy string.
  */
-export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean }): {
+export function getProxyFetchOptions(opts?: {
+  forAnthropicAPI?: boolean
+  url?: string
+}): {
   tls?: TLSConfig
   dispatcher?: undici.Dispatcher
   proxy?: string
@@ -305,9 +310,10 @@ export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean }): {
   }
 
   const proxyUrl = getProxyUrl()
+  const shouldBypass = opts?.url ? shouldBypassProxy(opts.url) : false
 
   // If we have a proxy, use the proxy agent (which includes mTLS config)
-  if (proxyUrl) {
+  if (proxyUrl && !shouldBypass) {
     if (typeof Bun !== 'undefined') {
       return { ...base, proxy: proxyUrl, ...getTLSFetchOptions() }
     }

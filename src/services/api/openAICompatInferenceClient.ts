@@ -6,7 +6,10 @@ import {
   type OpenAICompatWsV2Transport,
 } from './openAICompatWsV2Native.js'
 import { randomUUID } from 'crypto'
-import { parseSSEFrames } from '../../cli/transports/SSETransport.js'
+import {
+  assertSSEBufferWithinLimit,
+  parseSSEFrames,
+} from '../../cli/transports/SSETransport.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import {
@@ -263,13 +266,60 @@ function createBaseUsage() {
   }
 }
 
+/**
+ * Read prompt-cache HIT tokens from an OpenAI-compat usage object.
+ *
+ * Different servers report cache reads under different keys; the OpenAI-spec
+ * field (`prompt_tokens_details.cached_tokens`) is tried first, then known
+ * non-standard variants (DeepSeek's `prompt_cache_hit_tokens`, top-level
+ * `cached_tokens`, etc.). Returns undefined when NO recognized cache field is
+ * present, so callers can distinguish "provider reported 0 hits" from "provider
+ * did not report cache info at all" (see the warning in mapUsage).
+ *
+ * Cache CREATION (writes) is intentionally not handled: OpenAI-compat servers
+ * do not report a cache-write count, so it stays 0 upstream (createBaseUsage).
+ * Recovering it would require provider/gateway support.
+ */
+function readCacheHitTokens(
+  usage: OpenAIChatCompletionResponse['usage'],
+): number | undefined {
+  if (!usage) return undefined
+  const spec = usage.prompt_tokens_details?.cached_tokens
+  if (typeof spec === 'number') return spec
+  const extra = usage as Record<string, unknown>
+  for (const key of [
+    'prompt_cache_hit_tokens',
+    'cache_hit_tokens',
+    'cached_tokens',
+  ]) {
+    const value = extra[key]
+    if (typeof value === 'number') return value
+  }
+  return undefined
+}
+
+// One-time visibility signal: a provider returned tokens but no recognized
+// cache-read field, so cache reads are recorded as 0 — unknown, not zero.
+let warnedAboutMissingCacheField = false
+
 function mapUsage(usage: OpenAIChatCompletionResponse['usage']) {
   const base = createBaseUsage()
+  const cacheRead = readCacheHitTokens(usage)
+  if (
+    cacheRead === undefined &&
+    !warnedAboutMissingCacheField &&
+    (usage?.prompt_tokens ?? 0) > 0
+  ) {
+    warnedAboutMissingCacheField = true
+    logForDebugging(
+      '[OpenAICompat:usage] no recognized prompt-cache field in usage; cache reads recorded as 0 (unknown, not zero) for this provider',
+    )
+  }
   return {
     ...base,
     input_tokens: usage?.prompt_tokens ?? 0,
     output_tokens: usage?.completion_tokens ?? 0,
-    cache_read_input_tokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
+    cache_read_input_tokens: cacheRead ?? 0,
   }
 }
 
@@ -1288,6 +1338,7 @@ async function* streamOpenAIChatCompletionAsAnthropicEvents(
       }
       const { done, value } = result
       buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+      assertSSEBufferWithinLimit(buffer)
       const parsed = parseSSEFrames(buffer)
       buffer = parsed.remaining
 
@@ -1309,6 +1360,9 @@ async function* streamOpenAIChatCompletionAsAnthropicEvents(
         }
 
         if (chunk.usage) {
+          logForDebugging(
+            `[OpenAICompat:usage] stream usage=${jsonStringify(chunk.usage)} model=${chunk.model ?? messageModel}`,
+          )
           finalUsage = mapUsage(chunk.usage)
         }
 
@@ -1748,6 +1802,9 @@ export class OpenAICompatInferenceClient implements InferenceClient {
 
       const responseBody =
         (await response.json()) as OpenAIChatCompletionResponse
+      logForDebugging(
+        `[OpenAICompat:usage] unary usage=${jsonStringify(responseBody.usage)} model=${responseBody.model ?? params.model}`,
+      )
       return mapOpenAIChatCompletionToAnthropicMessage(
         responseBody,
         response,

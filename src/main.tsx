@@ -1609,12 +1609,17 @@ async function run(): Promise<CommanderCommand> {
     };
     // Store the explicit CLI flag so teammates can inherit it
     setChromeFlagOverride(chromeOpts.chrome);
-    const enableClaudeInChrome = shouldEnableClaudeInChrome(chromeOpts.chrome) && hasChromeStartupEligibilitySession({
+    const hasChromeEligibility = hasChromeStartupEligibilitySession({
       buildMode: process.env.NCODE_BUILD_MODE,
       userType: process.env.USER_TYPE,
       session: getCurrentCommandAvailabilitySession()
     });
-    const autoEnableClaudeInChrome = !enableClaudeInChrome && shouldAutoEnableClaudeInChrome();
+    const enableClaudeInChrome = shouldEnableClaudeInChrome(chromeOpts.chrome) && hasChromeEligibility;
+    // Auto-enable must respect the same managed-account eligibility as explicit
+    // enable; otherwise a non-managed build (e.g. OSS internal spin) would
+    // auto-install the native host and open the reconnect URL with no working
+    // console behind it.
+    const autoEnableClaudeInChrome = !enableClaudeInChrome && hasChromeEligibility && shouldAutoEnableClaudeInChrome();
     if (enableClaudeInChrome) {
       const platform = getPlatform();
       try {

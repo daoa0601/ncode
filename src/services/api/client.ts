@@ -100,6 +100,9 @@ export async function getAnthropicClient({
 }): Promise<Anthropic> {
   const defaultHeaders = await getFirstPartyRequestHeaders()
   const resolvedFetch = getWrappedClientFetch(fetchOverride, source)
+  const legacyAnthropicSdkBaseUrl = getLegacyAnthropicSdkBaseUrl()
+  const anthropicSdkBaseUrl =
+    legacyAnthropicSdkBaseUrl ?? 'https://api.anthropic.com'
 
   const ARGS = {
     defaultHeaders,
@@ -108,6 +111,7 @@ export async function getAnthropicClient({
     dangerouslyAllowBrowser: true,
     fetchOptions: getProxyFetchOptions({
       forAnthropicAPI: true,
+      url: anthropicSdkBaseUrl,
     }) as ClientOptions['fetchOptions'],
     ...(resolvedFetch && {
       fetch: resolvedFetch,
@@ -261,7 +265,6 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
-  const legacyAnthropicSdkBaseUrl = getLegacyAnthropicSdkBaseUrl()
   const currentSession = getAuthRuntime().getCurrentSession()
   const shouldUseCanonicalAuthToken =
     currentSession.sessionState === 'usable' &&

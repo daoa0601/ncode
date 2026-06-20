@@ -28,7 +28,6 @@ import { clearMemoryFileCaches } from './utils/claudemd.js'
 import { getCurrentProjectConfig, getGlobalConfig } from './utils/config.js'
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js'
 import { env } from './utils/env.js'
-import { envDynamic } from './utils/envDynamic.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
 import { errorMessage } from './utils/errors.js'
 import { findCanonicalGitRoot, findGitRoot, getIsGit } from './utils/git.js'
@@ -416,33 +415,10 @@ export async function setup(
       )
       process.exit(1)
     }
-
-    if (
-      isInternalBuild() &&
-      // Skip for Desktop's local agent mode — same trust model as CCR/BYOC
-      // (trusted Anthropic-managed launcher intentionally pre-approving everything).
-      // Precedent: permissionSetup.ts:861, applySettingsChange.ts:55 (PR #19116)
-      process.env.CLAUDE_CODE_ENTRYPOINT !== 'local-agent' &&
-      // Same for CCD (NCode in Desktop) — apps#29127 passes the flag
-      // unconditionally to unlock mid-session bypass switching
-      process.env.CLAUDE_CODE_ENTRYPOINT !== 'claude-desktop'
-    ) {
-      // Only await if permission mode is set to bypass
-      const [isDocker, hasInternet] = await Promise.all([
-        envDynamic.getIsDocker(),
-        env.hasInternetAccess(),
-      ])
-      const isBubblewrap = envDynamic.getIsBubblewrapSandbox()
-      const isSandbox = process.env.IS_SANDBOX === '1'
-      const isSandboxed = isDocker || isBubblewrap || isSandbox
-      if (!isSandboxed || hasInternet) {
-        // biome-ignore lint/suspicious/noConsole:: intentional console output
-        console.error(
-          `--dangerously-skip-permissions can only be used in Docker/sandbox containers with no internet access but got Docker: ${isDocker}, Bubblewrap: ${isBubblewrap}, IS_SANDBOX: ${isSandbox}, hasInternet: ${hasInternet}`,
-        )
-        process.exit(1)
-      }
-    }
+    // No Docker/sandbox+offline gate here: that was an Anthropic-internal policy
+    // (isInternalBuild()) inherited from Claude Code and does not apply to the OSS
+    // build. The user may run --dangerously-skip-permissions on their own machine,
+    // gated only by the universal root/sudo guard above.
   }
 
   if (process.env.NODE_ENV === 'test') {

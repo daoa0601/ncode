@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'crypto'
-import { mkdirSync, writeFileSync } from 'fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -47,21 +47,23 @@ function createProgressMessage(uuid?: string): any {
   }
 }
 
+let sessionFileForTest: string
+
 beforeEach(() => {
   process.env.USER_TYPE = 'noumena'
   resetProjectForTesting()
-  setSessionFileForTesting(
-    join(
-      tmpdir(),
-      'ncode-session-storage-tests',
-      randomUUID(),
-      'session.jsonl',
-    ),
+  sessionFileForTest = join(
+    tmpdir(),
+    'ncode-session-storage-tests',
+    randomUUID(),
+    'session.jsonl',
   )
+  setSessionFileForTesting(sessionFileForTest)
   clearSessionMessagesCache()
 })
 
 afterEach(() => {
+  delete process.env.TEST_ENABLE_SESSION_PERSISTENCE
   resetProjectForTesting()
   clearSessionMessagesCache()
 })
@@ -325,6 +327,48 @@ describe('recordTranscript', () => {
     // First call: empty file, both messages are new
     const result1 = await recordTranscript([msg1, msg2], undefined, undefined)
     expect(result1).toBe(msg2.uuid)
+  })
+
+  it('resolves after new transcript messages are written locally', async () => {
+    process.env.TEST_ENABLE_SESSION_PERSISTENCE = '1'
+    const msg1 = createUserMessage('prompt one')
+    const msg2 = createAssistantMessage('reply one')
+
+    await recordTranscript([msg1, msg2])
+
+    const entries = readFileSync(sessionFileForTest, 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line))
+      .filter(entry => entry.uuid)
+
+    expect(entries.map(entry => entry.uuid)).toEqual([msg1.uuid, msg2.uuid])
+  })
+
+  it('does not mark messages recorded when the local transcript write fails', async () => {
+    process.env.TEST_ENABLE_SESSION_PERSISTENCE = '1'
+    const root = join(tmpdir(), 'ncode-session-storage-tests', randomUUID())
+    mkdirSync(root, { recursive: true })
+    const blockedParent = join(root, 'blocked-parent')
+    writeFileSync(blockedParent, 'not a directory')
+    const validSessionFile = join(root, 'session.jsonl')
+    const msg1 = createUserMessage('prompt one')
+    const msg2 = createAssistantMessage('reply one')
+
+    setSessionFileForTesting(join(blockedParent, 'session.jsonl'))
+    await recordTranscript([msg1, msg2])
+
+    resetProjectForTesting()
+    setSessionFileForTesting(validSessionFile)
+    await recordTranscript([msg1, msg2])
+
+    const entries = readFileSync(validSessionFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line))
+      .filter(entry => entry.uuid)
+
+    expect(entries.map(entry => entry.uuid)).toEqual([msg1.uuid, msg2.uuid])
   })
 
   it('records only unrecorded suffix on subsequent calls', async () => {

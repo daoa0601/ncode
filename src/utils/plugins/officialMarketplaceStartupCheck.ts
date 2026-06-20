@@ -25,6 +25,7 @@ import {
 } from './marketplaceManager.js'
 import {
   isOfficialMarketplaceGitFallbackEnabled,
+  isOfficialMarketplaceSupported,
   OFFICIAL_MARKETPLACE_NAME,
   OFFICIAL_MARKETPLACE_SOURCE,
 } from './officialMarketplace.js'
@@ -39,6 +40,7 @@ export type OfficialMarketplaceSkipReason =
   | 'policy_blocked'
   | 'git_unavailable'
   | 'gcs_unavailable'
+  | 'build_not_supported'
   | 'unknown'
 
 /**
@@ -95,7 +97,7 @@ function shouldRetryInstallation(
   }
 
   // Permanent failures - don't retry
-  if (failReason === 'policy_blocked') {
+  if (failReason === 'policy_blocked' || failReason === 'build_not_supported') {
     return false
   }
 
@@ -158,6 +160,27 @@ export async function checkAndInstallOfficialMarketplace(): Promise<OfficialMark
   }
 
   try {
+    // The official marketplace is only supported in internal/noumena/dev builds.
+    // Public/external builds do not have a real marketplace repository; keeping
+    // the auto-install enabled there just clones a non-existent repo and fails.
+    if (!isOfficialMarketplaceSupported()) {
+      logForDebugging(
+        'Official marketplace not supported in this build, skipping',
+      )
+      saveGlobalConfig(current => ({
+        ...current,
+        officialMarketplaceAutoInstallAttempted: true,
+        officialMarketplaceAutoInstalled: false,
+        officialMarketplaceAutoInstallFailReason: 'build_not_supported',
+      }))
+      logEvent('ncode_official_marketplace_auto_install', {
+        installed: false,
+        skipped: true,
+        build_not_supported: true,
+      })
+      return { installed: false, skipped: true, reason: 'build_not_supported' }
+    }
+
     // Check if auto-install is disabled via env var
     if (isOfficialMarketplaceAutoInstallDisabled()) {
       logForDebugging(

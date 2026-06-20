@@ -1,7 +1,6 @@
 import { execaSync } from 'execa'
 import { logForDebugging } from '../debug.js'
 import { execFileNoThrow } from '../execFileNoThrow.js'
-import { execSyncWithDefaults_DEPRECATED } from '../execFileNoThrowPortable.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
@@ -23,6 +22,20 @@ import type { SecureStorage, SecureStorageData } from './types.js'
 // accounting differences.
 const SECURITY_STDIN_LINE_LIMIT = 4096 - 64
 
+export function getMacOsKeychainReadArgs(
+  username: string,
+  storageServiceName: string,
+): string[] {
+  return ['find-generic-password', '-a', username, '-w', '-s', storageServiceName]
+}
+
+export function getMacOsKeychainDeleteArgs(
+  username: string,
+  storageServiceName: string,
+): string[] {
+  return ['delete-generic-password', '-a', username, '-s', storageServiceName]
+}
+
 export const macOsKeychainStorage = {
   name: 'keychain',
   read(): SecureStorageData | null {
@@ -36,11 +49,16 @@ export const macOsKeychainStorage = {
         CREDENTIALS_SERVICE_SUFFIX,
       )
       const username = getUsername()
-      const result = execSyncWithDefaults_DEPRECATED(
-        `security find-generic-password -a "${username}" -w -s "${storageServiceName}"`,
+      const result = execaSync(
+        'security',
+        getMacOsKeychainReadArgs(username, storageServiceName),
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          reject: false,
+        },
       )
-      if (result) {
-        const data = jsonParse(result)
+      if (result.exitCode === 0 && result.stdout) {
+        const data = jsonParse(result.stdout.trim())
         keychainCacheState.cache = { data, cachedAt: Date.now() }
         return data
       }
@@ -165,10 +183,15 @@ export const macOsKeychainStorage = {
         CREDENTIALS_SERVICE_SUFFIX,
       )
       const username = getUsername()
-      execSyncWithDefaults_DEPRECATED(
-        `security delete-generic-password -a "${username}" -s "${storageServiceName}"`,
+      const result = execaSync(
+        'security',
+        getMacOsKeychainDeleteArgs(username, storageServiceName),
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          reject: false,
+        },
       )
-      return true
+      return result.exitCode === 0
     } catch (_e) {
       return false
     }

@@ -7,6 +7,7 @@
  */
 
 import type { MarketplaceSource } from './schemas.js'
+import { isInternalBuild } from '../../capabilities/static.js'
 import { isEnvTruthy } from '../envUtils.js'
 
 /**
@@ -24,6 +25,20 @@ export const OFFICIAL_MARKETPLACE_SOURCE = {
  * in the known_marketplaces.json file.
  */
 export const OFFICIAL_MARKETPLACE_NAME = 'noumena-plugins-official'
+
+/**
+ * Whether the official Noumena marketplace is supported in this build.
+ *
+ * The official marketplace is a Noumena-internal compatibility surface: it
+ * ships first-party plugins that are only maintained for Noumena product
+ * builds. Public/external builds do not have a real marketplace repository
+ * (it was never shipped to GitHub), so auto-installing it just produces
+ * "repository not found" failures for users who still have legacy plugin IDs
+ * from Codex in their settings.
+ */
+export function isOfficialMarketplaceSupported(): boolean {
+  return isInternalBuild()
+}
 
 /**
  * Emergency-only escape hatch for official marketplace git fallback.

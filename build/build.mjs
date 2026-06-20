@@ -461,6 +461,17 @@ export async function resolveBuildSettings(options = {}) {
     process.env.CLAUDE_CODE_VERIFY_PLAN ??
     (internalCompatibilityBuild ? 'true' : 'false');
 
+  // Privacy-first build (NCODE_PRIVACY_FIRST=1): bake the nonessential-traffic
+  // kill switch into the binary so telemetry, auto-update, grove, release-notes,
+  // and model-capability fetches are suppressed unless the build is produced
+  // without this flag. Only auth and inference traffic leave the machine. All
+  // downstream code already keys off this same env var, so every "why is X
+  // disabled" diagnostic stays accurate with no source changes.
+  const privacyFirstDefine =
+    /^(1|true)$/i.test(process.env.NCODE_PRIVACY_FIRST ?? '')
+      ? { 'process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': JSON.stringify('1') }
+      : {}
+
   return {
     packageJson,
     buildMode,
@@ -469,6 +480,7 @@ export async function resolveBuildSettings(options = {}) {
     hasChromeMcpPackage,
     sharpTargetSlug: resolveSharpTargetSlug(options.target),
     define: {
+      ...privacyFirstDefine,
       'process.env.USER_TYPE': JSON.stringify(userType),
       'process.env.NCODE_BUILD_MODE': JSON.stringify(buildMode),
       'process.env.CLAUDE_CODE_VERIFY_PLAN': JSON.stringify(verifyPlan),

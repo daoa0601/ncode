@@ -84,7 +84,12 @@ const AgentJsonSchema = lazySchema(() =>
       .transform(m => (m.toLowerCase() === 'inherit' ? 'inherit' : m))
       .optional(),
     effort: z.union([z.enum(EFFORT_LEVELS), z.number().int()]).optional(),
-    permissionMode: z.enum(PERMISSION_MODES).optional(),
+    permissionMode: z
+      .enum(PERMISSION_MODES)
+      .refine(isAgentDefinitionPermissionMode, {
+        message: 'Agent permissionMode cannot be bypassPermissions',
+      })
+      .optional(),
     mcpServers: z.array(AgentMcpServerSpecSchema()).optional(),
     hooks: HooksSchema().optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -98,6 +103,15 @@ const AgentJsonSchema = lazySchema(() =>
     ).optional(),
   }),
 )
+
+export function isAgentDefinitionPermissionMode(
+  mode: string,
+): mode is PermissionMode {
+  return (
+    (PERMISSION_MODES as readonly string[]).includes(mode) &&
+    mode !== 'bypassPermissions'
+  )
+}
 
 const AgentsJsonSchema = lazySchema(() =>
   z.record(z.string(), AgentJsonSchema()),
@@ -637,11 +651,10 @@ export function parseAgentFromMarkdown(
       | string
       | undefined
     const isValidPermissionMode =
-      permissionModeRaw &&
-      (PERMISSION_MODES as readonly string[]).includes(permissionModeRaw)
+      permissionModeRaw && isAgentDefinitionPermissionMode(permissionModeRaw)
 
     if (permissionModeRaw && !isValidPermissionMode) {
-      const errorMsg = `Agent file ${filePath} has invalid permissionMode '${permissionModeRaw}'. Valid options: ${PERMISSION_MODES.join(', ')}`
+      const errorMsg = `Agent file ${filePath} has invalid permissionMode '${permissionModeRaw}'. Valid options: ${PERMISSION_MODES.filter(mode => mode !== 'bypassPermissions').join(', ')}`
       logForDebugging(errorMsg)
     }
 

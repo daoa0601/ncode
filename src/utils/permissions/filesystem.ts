@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
-import { join, normalize, posix, sep } from 'path'
+import { basename, join, normalize, posix, sep } from 'path'
 import { hasAutoMemPathOverride, isAutoMemPath } from 'src/memdir/paths.js'
 import { isAgentMemoryPath } from 'src/tools/AgentTool/agentMemory.js'
 import {
@@ -252,15 +252,24 @@ function isNcodeConfigFilePath(filePath: string): boolean {
 }
 
 // Check if file is the plan file for the current session
-function isSessionPlanFile(absolutePath: string): boolean {
+export function isSessionPlanFile(absolutePath: string): boolean {
   // Check if path is a plan file for this session (main or agent-specific)
   // Main plan file: {plansDir}/{planSlug}.md
   // Agent plan file: {plansDir}/{planSlug}-agent-{agentId}.md
-  const expectedPrefix = join(getPlansDirectory(), getPlanSlug())
   // SECURITY: Normalize to prevent path traversal bypasses via .. segments
   const normalizedPath = normalize(absolutePath)
+  const planSlug = getPlanSlug()
+  const mainPlanPath = normalize(join(getPlansDirectory(), `${planSlug}.md`))
+  if (normalizedPath === mainPlanPath) return true
+
+  const agentPlanPrefix = normalize(join(getPlansDirectory(), `${planSlug}-agent-`))
+  if (!normalizedPath.startsWith(agentPlanPrefix)) return false
+
+  const agentFileName = normalizedPath.slice(agentPlanPrefix.length)
   return (
-    normalizedPath.startsWith(expectedPrefix) && normalizedPath.endsWith('.md')
+    agentFileName === basename(agentFileName) &&
+    agentFileName.length > '.md'.length &&
+    agentFileName.endsWith('.md')
   )
 }
 

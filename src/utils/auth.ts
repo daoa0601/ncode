@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import { exec } from 'child_process'
-import { execa } from 'execa'
+import { execa, execaSync } from 'execa'
 import { mkdir, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { join } from 'path'
@@ -79,6 +79,7 @@ import {
   getMacOsKeychainStorageServiceName,
   getUsername,
 } from './secureStorage/macOsKeychainHelpers.js'
+import { getMacOsKeychainReadArgs } from './secureStorage/macOsKeychainStorage.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
@@ -615,7 +616,7 @@ async function _executeApiKeyHelper(
 
   if (isApiKeyHelperFromProjectOrLocalSettings()) {
     const hasTrust = checkHasTrustDialogAccepted()
-    if (!hasTrust && !isNonInteractiveSession) {
+    if (shouldBlockProjectOrLocalApiKeyHelperBeforeTrust(hasTrust)) {
       const error = new Error(
         `Security: apiKeyHelper executed before workspace trust is confirmed. If you see this message, post in ${MACRO.FEEDBACK_CHANNEL}.`,
       )
@@ -641,6 +642,12 @@ async function _executeApiKeyHelper(
     throw new Error('did not return a value')
   }
   return stdout
+}
+
+export function shouldBlockProjectOrLocalApiKeyHelperBeforeTrust(
+  hasTrust: boolean,
+): boolean {
+  return !hasTrust
 }
 
 /**
@@ -1135,11 +1142,16 @@ export const getApiKeyFromConfigOrMacOSKeychain = memoize(
       } else {
         const storageServiceName = getMacOsKeychainStorageServiceName()
         try {
-          const result = execSyncWithDefaults_DEPRECATED(
-            `security find-generic-password -a $USER -w -s "${storageServiceName}"`,
+          const result = execaSync(
+            'security',
+            getMacOsKeychainReadArgs(getUsername(), storageServiceName),
+            {
+              stdio: ['ignore', 'pipe', 'pipe'],
+              reject: false,
+            },
           )
-          if (result) {
-            return { key: result, source: '/login managed key' }
+          if (result.exitCode === 0 && result.stdout) {
+            return { key: result.stdout.trim(), source: '/login managed key' }
           }
         } catch (e) {
           logError(e)

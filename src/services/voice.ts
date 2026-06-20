@@ -347,11 +347,11 @@ export async function startRecording(
   const useSilenceDetection = options?.silenceDetection !== false
   if (nativeAvailable) {
     // Ensure any previous recording is fully stopped
-    if (nativeRecordingActive || napi.isNativeRecordingActive()) {
-      napi.stopNativeRecording()
+    if (nativeRecordingActive || napi.isRecording()) {
+      napi.stopRecording()
       nativeRecordingActive = false
     }
-    const started = napi.startNativeRecording(
+    const started = napi.startRecording(
       (data: Buffer) => {
         onData(data)
       },
@@ -514,7 +514,7 @@ function startArecordRecording(
 
 export function stopRecording(): void {
   if (nativeRecordingActive && audioNapi) {
-    audioNapi.stopNativeRecording()
+    audioNapi.stopRecording()
     nativeRecordingActive = false
     return
   }

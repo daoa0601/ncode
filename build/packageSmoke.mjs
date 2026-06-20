@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -220,7 +220,11 @@ async function main() {
           `Native runtime probe did not report Bun runtime: ${JSON.stringify(probeResult)}`,
         );
       }
-      if (probeResult.execPath !== probeBinaryPath) {
+      const [actualExecPath, expectedExecPath] = await Promise.all([
+        realpath(probeResult.execPath),
+        realpath(probeBinaryPath),
+      ]);
+      if (actualExecPath !== expectedExecPath) {
         throw new Error(
           `Native runtime probe execPath mismatch. Expected ${probeBinaryPath}, got ${probeResult.execPath}`,
         );

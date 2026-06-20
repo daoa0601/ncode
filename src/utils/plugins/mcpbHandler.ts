@@ -21,6 +21,7 @@ import {
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getSystemDirectories } from '../systemDirectories.js'
 import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
+import { validateMcpbDownloadUrl } from './mcpbUrl.js'
 /**
  * User configuration values for MCPB
  */
@@ -484,6 +485,11 @@ async function downloadMcpb(
   destPath: string,
   onProgress?: ProgressCallback,
 ): Promise<Uint8Array> {
+  const validationError = validateMcpbDownloadUrl(url)
+  if (validationError) {
+    throw new Error(`Invalid MCPB URL: ${validationError}`)
+  }
+
   logForDebugging(`Downloading MCPB from ${url}`)
   if (onProgress) {
     onProgress(`Downloading ${url}...`)
@@ -495,7 +501,7 @@ async function downloadMcpb(
     const response = await axios.get(url, {
       timeout: 120000, // 2 minute timeout
       responseType: 'arraybuffer',
-      maxRedirects: 5, // Follow redirects (like curl -L)
+      maxRedirects: 0,
       onDownloadProgress: progressEvent => {
         if (progressEvent.total && onProgress) {
           const percent = Math.round(

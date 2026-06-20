@@ -20,7 +20,7 @@ import { getPlatform } from '../../utils/platform.js';
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import { isPluginInstalled } from '../../utils/plugins/installedPluginsManager.js';
 import { addMarketplaceSource, clearMarketplacesCache, loadKnownMarketplacesConfig, refreshMarketplace } from '../../utils/plugins/marketplaceManager.js';
-import { OFFICIAL_MARKETPLACE_NAME } from '../../utils/plugins/officialMarketplace.js';
+import { OFFICIAL_MARKETPLACE_NAME, isOfficialMarketplaceSupported } from '../../utils/plugins/officialMarketplace.js';
 import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js';
 import { installSelectedPlugins } from '../../utils/plugins/pluginStartupCheck.js';
 import { isInternalBuild } from 'src/capabilities/static.js'
@@ -164,6 +164,14 @@ function ThinkbackInstaller({
   useEffect(() => {
     async function checkAndInstall(): Promise<void> {
       try {
+        // The official marketplace is only available in Noumena product builds.
+        if (!isOfficialMarketplaceSupported()) {
+          const msg = 'Thinkback is only available in Noumena product builds.';
+          setState({ phase: 'error', message: msg });
+          onError(msg);
+          return;
+        }
+
         // Check if marketplace is installed
         const knownMarketplaces = await loadKnownMarketplacesConfig();
         const marketplaceName = getMarketplaceName();

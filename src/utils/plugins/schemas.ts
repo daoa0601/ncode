@@ -1,7 +1,10 @@
 import { z } from 'zod/v4'
+import { isAbsolute } from 'path'
 import { HooksSchema } from '../../schemas/hooks.js'
 import { McpServerConfigSchema } from '../../services/mcp/types.js'
 import { lazySchema } from '../lazySchema.js'
+import { containsPathTraversal } from '../path.js'
+import { validateMcpbDownloadUrl } from './mcpbUrl.js'
 
 /**
  * First-layer defense against official marketplace impersonation.
@@ -143,7 +146,14 @@ export function validateOfficialNameSource(
 /**
  * Schema for relative file paths that must start with './'
  */
-const RelativePath = lazySchema(() => z.string().startsWith('./'))
+const RelativePath = lazySchema(() =>
+  z
+    .string()
+    .startsWith('./')
+    .refine(path => !containsPathTraversal(path) && !isAbsolute(path), {
+      message: 'Relative paths must stay within the plugin root',
+    }),
+)
 
 /**
  * Schema for relative paths to JSON files
@@ -164,8 +174,8 @@ const McpbPath = lazySchema(() =>
     z
       .string()
       .url()
-      .refine(url => url.endsWith('.mcpb') || url.endsWith('.dxt'), {
-        message: 'MCPB URL must end with .mcpb or .dxt',
+      .refine(url => validateMcpbDownloadUrl(url) === null, {
+        message: 'MCPB URL must be an https .mcpb or .dxt download URL',
       })
       .describe('URL to MCPB file'),
   ]),

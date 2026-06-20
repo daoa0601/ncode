@@ -596,7 +596,7 @@ class Project {
   // callers of enqueueWrite can optionally await their specific write.
   private writeQueues = new Map<
     string,
-    Array<{ entry: Entry; resolve: () => void }>
+    Array<{ entry: Entry; resolve: (written: boolean) => void }>
   >()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private activeDrain: Promise<void> | null = null
@@ -641,8 +641,8 @@ class Project {
     }
   }
 
-  private enqueueWrite(filePath: string, entry: Entry): Promise<void> {
-    return new Promise<void>(resolve => {
+  private enqueueWrite(filePath: string, entry: Entry): Promise<boolean> {
+    return new Promise<boolean>(resolve => {
       let queue = this.writeQueues.get(filePath)
       if (!queue) {
         queue = []
@@ -700,7 +700,10 @@ class Project {
       await fsAppendFile(filePath, data, { mode: 0o600 })
       return true
     } catch (error) {
-      if (this.disablePersistenceForError(error, `append ${filePath}`)) {
+      if (
+        !isENOENT(error) &&
+        this.disablePersistenceForError(error, `append ${filePath}`)
+      ) {
         return false
       }
       // Directory may not exist — some NFS-like filesystems return
@@ -731,16 +734,16 @@ class Project {
       const batch = queue.splice(0)
 
       let content = ''
-      const resolvers: Array<() => void> = []
+      const resolvers: Array<(written: boolean) => void> = []
 
       for (const { entry, resolve } of batch) {
         const line = jsonStringify(entry) + '\n'
 
         if (content.length + line.length >= this.MAX_CHUNK_BYTES) {
           // Flush chunk and resolve its entries before starting a new one
-          await this.appendToFile(filePath, content)
+          const written = await this.appendToFile(filePath, content)
           for (const r of resolvers) {
-            r()
+            r(written)
           }
           resolvers.length = 0
           content = ''
@@ -751,9 +754,9 @@ class Project {
       }
 
       if (content.length > 0) {
-        await this.appendToFile(filePath, content)
+        const written = await this.appendToFile(filePath, content)
         for (const r of resolvers) {
-          r()
+          r(written)
         }
       }
     }
@@ -1101,8 +1104,9 @@ class Project {
       }
 
       // Get slug if one exists for this session (used for plan files, etc.)
-      const sessionId = getSessionId()
+      const sessionId = getSessionId() as UUID
       const slug = getPlanSlugCache().get(sessionId)
+      const transcriptMessages: TranscriptMessage[] = []
 
       for (const message of messages) {
         const isCompactBoundary = isCompactBoundaryMessage(message)
@@ -1144,7 +1148,7 @@ class Project {
           gitBranch,
           slug,
         }
-        await this.appendEntry(transcriptMessage)
+        transcriptMessages.push(transcriptMessage)
         if (isChainParticipant(message)) {
           parentUuid = message.uuid
         }
@@ -1161,6 +1165,8 @@ class Project {
             flat.length > 200 ? flat.slice(0, 200).trim() + '…' : flat
         }
       }
+
+      await this.appendTranscriptEntries(transcriptMessages, sessionId)
     })
   }
 
@@ -1205,6 +1211,78 @@ class Project {
       }
       await this.appendEntry(entry)
     })
+  }
+
+  private async appendTranscriptEntries(
+    entries: TranscriptMessage[],
+    sessionId: UUID,
+  ): Promise<void> {
+    if (entries.length === 0 || this.shouldSkipPersistence()) {
+      return
+    }
+
+    const currentSessionId = getSessionId() as UUID
+    const isCurrentSession = sessionId === currentSessionId
+
+    let sessionFile: string
+    if (isCurrentSession) {
+      if (this.sessionFile === null) {
+        this.pendingEntries.push(...entries)
+        return
+      }
+      sessionFile = this.sessionFile
+    } else {
+      const existing = await this.getExistingSessionFile(sessionId)
+      if (!existing) {
+        logError(
+          new Error(
+            `appendTranscriptEntries: session file not found for other session ${sessionId}`,
+          ),
+        )
+        return
+      }
+      sessionFile = existing
+    }
+
+    const messageSet = await getSessionMessages(sessionId)
+    const localWrites: Promise<boolean>[] = []
+    const mainWrites: Array<{
+      entry: TranscriptMessage
+      write: Promise<boolean>
+    }> = []
+
+    for (const entry of entries) {
+      const isAgentSidechain = entry.isSidechain && entry.agentId !== undefined
+      const targetFile = isAgentSidechain
+        ? getAgentTranscriptPath(asAgentId(entry.agentId!))
+        : sessionFile
+      const isNewUuid = !messageSet.has(entry.uuid)
+
+      if (!isAgentSidechain && !isNewUuid) {
+        continue
+      }
+
+      const write = this.enqueueWrite(targetFile, entry).then(written => {
+        if (written) {
+          if (!isAgentSidechain) {
+            messageSet.add(entry.uuid)
+          }
+        }
+        return written
+      })
+      localWrites.push(write)
+
+      if (!isAgentSidechain) {
+        mainWrites.push({ entry, write })
+      }
+    }
+
+    await Promise.all(localWrites)
+    for (const { entry, write } of mainWrites) {
+      if (await write) {
+        await this.persistToRemote(sessionId, entry)
+      }
+    }
   }
 
   async appendEntry(entry: Entry, sessionId: UUID = getSessionId() as UUID) {
@@ -1296,51 +1374,12 @@ class Project {
       // Always append. Last-wins on restore — later entries supersede.
       void this.enqueueWrite(sessionFile, entry)
     } else {
-      const messageSet = await getSessionMessages(sessionId)
       if (entry.type === 'queue-operation') {
         // Queue operations are always appended to the session file
         void this.enqueueWrite(sessionFile, entry)
       } else {
-        // At this point, entry must be a TranscriptMessage (user/assistant/attachment/system)
-        // All other entry types have been handled above
-        const isAgentSidechain =
-          entry.isSidechain && entry.agentId !== undefined
-        const targetFile = isAgentSidechain
-          ? getAgentTranscriptPath(asAgentId(entry.agentId!))
-          : sessionFile
-
-        // For message entries, check if UUID already exists in current session.
-        // Skip dedup for agent sidechain LOCAL writes — they go to a separate
-        // file, and fork-inherited parent messages share UUIDs with the main
-        // session transcript. Deduping against the main session's set would
-        // drop them, leaving the persisted sidechain transcript incomplete
-        // (resume-of-fork loads a 10KB file instead of the full 85KB inherited
-        // context).
-        //
-        // The sidechain bypass applies ONLY to the local file write — remote
-        // persistence (session-ingress) uses a single Last-Uuid chain per
-        // sessionId, so re-POSTing a UUID it already has 409s and eventually
-        // exhausts retries → gracefulShutdownSync(1). See inc-4718.
-        const isNewUuid = !messageSet.has(entry.uuid)
-        if (isAgentSidechain || isNewUuid) {
-          // Enqueue write — appendToFile handles ENOENT by creating directories
-          void this.enqueueWrite(targetFile, entry)
-
-          if (!isAgentSidechain) {
-            // messageSet is main-file-authoritative. Sidechain entries go to a
-            // separate agent file — adding their UUIDs here causes recordTranscript
-            // to skip them on the main thread (line ~1270), so the message is never
-            // written to the main session file. The next main-thread message then
-            // chains its parentUuid to a UUID that only exists in the agent file,
-            // and --resume's buildConversationChain terminates at the dangling ref.
-            // Same constraint for remote (inc-4718 above): sidechain persisting a
-            // UUID the main thread hasn't written yet → 409 when main writes it.
-            messageSet.add(entry.uuid)
-
-            if (isTranscriptMessage(entry)) {
-              await this.persistToRemote(sessionId, entry)
-            }
-          }
+        if (isTranscriptMessage(entry)) {
+          await this.appendTranscriptEntries([entry], sessionId)
         }
       }
     }
