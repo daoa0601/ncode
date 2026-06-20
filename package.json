@@ -21,6 +21,7 @@
     "build:noumena": "bun run package:compiled:noumena",
     "build:dev": "bun run package:compiled:dev",
     "build:internal": "bun run package:compiled:internal",
+    "build:personal": "NCODE_PRIVACY_FIRST=1 bun run build:internal",
     "build:source": "bun run build:source:external",
     "build:source:external": "NCODE_USER_TYPE=external bun build/build.mjs",
     "build:source:noumena": "NCODE_USER_TYPE=noumena bun build/build.mjs",

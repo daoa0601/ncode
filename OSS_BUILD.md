@@ -101,6 +101,48 @@ NOUMENA_API_KEY=... .tmp/packages/ncode-0.1.0-linux-x64/ncode
 ANTHROPIC_API_KEY=... .tmp/packages/ncode-0.1.0-linux-x64/ncode
 ```
 
+## Personal no-telemetry build with AWS Bedrock (BYOK)
+
+To run entirely against your own AWS Bedrock account — no Noumena login, no telemetry — build the privacy-first internal binary and point it at Bedrock. Only auth and inference leave the machine.
+
+### 1. Build the no-telemetry binary
+
+```bash
+bun install
+bun run build:personal    # = NCODE_PRIVACY_FIRST=1 build:internal
+```
+
+`NCODE_PRIVACY_FIRST=1` bakes `essential-traffic` mode into the binary at compile time: telemetry events, auto-update, Grove, release-notes, and model-capability fetches are all suppressed, and **no metric export readers are created** (opt-in OTLP and BigQuery both stay inert). Auth and inference are the only network calls. Without the flag, the build behaves like a normal `internal` build.
+
+The binary is written to `.tmp/packages/ncode-<version>-<target>/ncode` (e.g. `ncode-0.1.0-darwin-arm64/ncode`).
+
+### 2. Configure AWS Bedrock
+
+Set the Bedrock flag, your region, credentials, and model. No `/login` is needed — inference goes straight to your AWS account.
+
+```bash
+export CLAUDE_CODE_USE_BEDROCK=1
+export AWS_REGION=us-east-1                      # a region where your model is available
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...                     # only for temporary/SSO credentials
+export ANTHROPIC_MODEL=anthropic.claude-...      # a Bedrock model identifier you have access to
+```
+
+For SSO or short-lived credentials you can also export `AWS_PROFILE` and run `aws sso login` first, or set the `awsAuthRefresh` setting to a command that refreshes credentials on a schedule.
+
+```bash
+.tmp/packages/ncode-0.1.0-darwin-arm64/ncode
+```
+
+### 3. Verify telemetry is off
+
+```bash
+ANTHROPIC_API_KEY=dummy .tmp/packages/ncode-0.1.0-darwin-arm64/ncode --debug-to-stderr -p "x"
+```
+
+Expect `[3P telemetry] isTelemetryEnabled=false` and `1P event logging not enabled`, with **no** `metrics export failed` lines. The only outbound request should be your Bedrock inference call. (Bedrock also auto-disables analytics client-side, so even without the privacy flag there is no 1P analytics for Bedrock turns.)
+
 ## Run locally
 
 Run the native binary produced by `bun run build`:
