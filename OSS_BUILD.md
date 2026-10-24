@@ -21,7 +21,7 @@ Build from source if you are on:
 
 ## Requirements
 
-- [Bun](https://bun.sh) 1.3.10 or newer
+- [Bun](https://bun.sh) 1.4.4 or newer (older Bun embeds a Brotli decoder vulnerable to CVE-2026-111497)
 - [Rust](https://rustup.rs) 1.80 or newer (with `cargo` on `PATH`)
 - `curl` or `wget` (only for the install helper)
 

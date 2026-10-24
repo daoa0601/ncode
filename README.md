@@ -70,7 +70,7 @@ You can also set `NOUMENA_MODEL=kimi-2.7-coder` or `NOUMENA_MODEL=glm-5.2` in yo
 Build requirements:
 
 - Node.js 18 or newer
-- Bun 1.3.10 or newer
+- Bun 1.4.4 or newer (older Bun embeds a Brotli decoder vulnerable to CVE-2026-111497)
 - Rust 1.80 or newer (with `cargo` on `PATH`)
 
 Developer test requirements:
